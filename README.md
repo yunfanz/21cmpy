@@ -1,2 +1,2 @@
 # 21cmpy
-PyCUDA based implementation of 21cmFAST
+PyCUDA implementation of 21cmFAST: in working progress
