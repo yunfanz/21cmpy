@@ -2,6 +2,18 @@ import pickle
 import os, fnmatch, re
 import numpy as np
 import optparse
+import os, sys, inspect
+
+# adding pwd to path
+cmd_folder = os.path.realpath(os.path.abspath(os.path.split(inspect.getfile( inspect.currentframe() ))[0]))
+parent_folder = os.path.realpath(os.path.abspath(os.path.split(cmd_folder)[0]))
+print 'parent_folder', parent_folder
+if parent_folder not in sys.path:
+    sys.path.insert(0, parent_folder)
+if cmd_folder not in sys.path:
+    sys.path.insert(0, cmd_folder)
+
+
 
 def find_files(directory, pattern='watershed_*.npz'):
     '''Recursively finds all files matching the pattern.'''
