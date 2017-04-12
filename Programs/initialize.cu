@@ -1,8 +1,9 @@
 #define BLOCK_SIZE 8
+#define BLOCK_VOLUME 8*8*8
 #include <pycuda-complex.hpp>
 #define INDEX(k,j,i,ld) ((k)*ld*ld + (j) * ld + (i))
 #define E (float) (2.7182818284)
-
+texture<float,2> pspec;
  __global__ void HII_filter(pycuda::complex<float>* fourierbox, int w, int filter_type, float R)
 {
   int tx = threadIdx.x;  int ty = threadIdx.y; int tz = threadIdx.z;
@@ -35,24 +36,44 @@
   }
 }
 
-__global__ void init_pk(float* fourierbox, int w)
+
+__global__ void init_kernel(float* fourierbox, int w)
 {
   int tx = threadIdx.x;  int ty = threadIdx.y; int tz = threadIdx.z;
   int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
   int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int p = INDEX(k,j,i,w);
+  int p = INDEX(k,j,i,w); int tp = INDEX(tz,ty,tx, bdx);
   if (j >= w || i >= w || k >= w) return;
-  float k_x, k_y, k_z, k_mag;
+  float k_x, k_y, k_z, k_mag, ps;
   int hw = w/2; 
   k_z = (k>hw) ? (k-w)*%(DELTAK)s : k*%(DELTAK)s;
   k_y = (j>hw) ? (j-w)*%(DELTAK)s : j*%(DELTAK)s;
   k_x = (i>hw) ? (i-w)*%(DELTAK)s : i*%(DELTAK)s;
 
   k_mag = sqrt(k_x*k_x + k_y*k_y + k_z*k_z);
-  fourierbox[p] = k_mag;
-}
 
+  __shared__ float s_K[BLOCK_VOLUME];
+  __shared__ float s_P[BLOCK_VOLUME];
+  if (tp < BLOCK_VOLUME) {
+    s_K[tp] = tex2D(pspec, 0, tp);
+    s_P[tp] = tex2D(pspec, 1, tp);
+  }
+  __syncthreads();
+
+  if (k_mag == 0)
+  {
+    fourierbox[p] = 0.0;
+    return;
+  }
+  //Linear Interpolation of power spectrum
+  int ind = 0;
+  while (s_K[ind]< k_mag){ ind++; }
+  ps = s_P[ind-1] + (s_P[ind] - s_P[ind-1])*(k_mag - s_K[ind-1])/(s_K[ind] - s_K[ind-1]);
+
+  fourierbox[p] = sqrt(ps * %(PIX_VOLUME)s);
+
+}
 
 __global__ void subsample(float* largebox, float* smallbox, int w, int sw, float pixel_factor)
 {
