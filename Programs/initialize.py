@@ -1,5 +1,3 @@
-import cosmolopy.perturbation as pb
-import cosmolopy.density as cd
 import pycuda.compiler as nvcc
 import pycuda.gpuarray as gpuarray
 import pycuda.driver as cu
@@ -38,22 +36,13 @@ def step1():
 
 	kernel_source = open(cmd_folder+"/initialize.cu").read()
 	kernel_code = kernel_source % {
-        
-        'DELTAK': DELTA_K
-    }
+
+		'DELTAK': DELTA_K
+	}
 	main_module = nvcc.SourceModule(kernel_code)
 	initpk_kernel = main_module.get_function("init_pk")
 	HII_filter = main_module.get_function("HII_filter")
 	subsample_kernel = main_module.get_function("subsample")
-
-	block_size =  (8,8,8)
-	grid_size =   (DIM/(block_size[0]),
-					DIM/(block_size[0]),
-					DIM/(block_size[0]))
-	small_grid_size =   (HII_DIM/(block_size[0]),
-				HII_DIM/(block_size[0]),
-				HII_DIM/(block_size[0]))
-
 
 	largebox_d = gpuarray.zeros(shape, dtype=np.float32)
 	initpk_kernel(largebox_d, np.int32(DIM), block=block_size, grid=grid_size)
@@ -69,7 +58,7 @@ def step1():
 
 	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
 	HII_filter(largebox_d, N, ZERO, smoothR, block=block_size, grid=grid_size);
-	plan = Plan((N,N,N), dtype=np.complex64)
+	plan = Plan(shape, dtype=np.complex64)
 	plan.execute(largebox_d, inverse=True)  #FFT to real space of smoothed box
 
 	smallbox_d = gpuarray.zeros(HII_shape, dtype=np.float32)
@@ -92,13 +81,6 @@ def step2():
 	HII_filter = main_module.get_function("HII_filter")
 	subsample_kernel = main_module.get_function("subsample")
 	velocity_kernel = main_module.get_function("set_velocity")
-	block_size =  (8,8,8)
-	grid_size = (DIM/(block_size[0]),
-				DIM/(block_size[0]),
-				DIM/(block_size[0]))
-	small_grid_size = (HII_DIM/(block_size[0]),
-					HII_DIM/(block_size[0]),
-					HII_DIM/(block_size[0]))
 
 
 	plan = Plan((DIM,DIM,DIM), dtype=np.complex64)
