@@ -77,6 +77,7 @@ def evolve_zeldovich(z, IN='numpy'):
 	if BOX_LEN > DIM:
 		print "perturb_field: WARNING: Resolution is likely too low for accurate evolved density fields"
 	#move_mass(updated_d, deltax_d, vx_d, vy_d, vz_d, np.float32(1./primordial_fgrowth))
+	raise Exception("Not yet implemented")
 
 	return
 
