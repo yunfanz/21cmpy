@@ -10,8 +10,6 @@ from IO_utils import *
 #print cmd_folder
 from ..cosmo_files import *
 from ..Parameter_files import *
-from numpy.fft import fftn as hfft
-from numpy.fft import ifftn as hifft
 import pyfftw
 """
 Generates the initial conditions:
