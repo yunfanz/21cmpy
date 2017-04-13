@@ -43,7 +43,7 @@ def step1():
 	kernel_code = kernel_source % {
 
 		'DELTAK': DELTA_K,
-		'PIX_VOLUME': PIX_VOLUME
+		'VOLUME': VOLUME
 	}
 	main_module = nvcc.SourceModule(kernel_code)
 	init_kernel = main_module.get_function("init_kernel")
@@ -74,14 +74,17 @@ def step1():
 	HII_filter(largebox_d, N, ZERO, smoothR, block=block_size, grid=grid_size);
 	plan = Plan(shape, dtype=np.complex64)
 	plan.execute(largebox_d, inverse=True)  #FFT to real space of smoothed box
-
+	largebox_d /=  VOLUME  #divide by VOLUME when converting from k space to real space
+	# This saves a large resolution deltax
+	# np.save(parent_folder+"/Boxes/deltax_z0.00_{%i}_{%.0f}Mpc".format(DIM, BOX_LEN), largebox_d.get())
 	smallbox_d = gpuarray.zeros(HII_shape, dtype=np.float32)
 	subsample_kernel(largebox_d.real, smallbox_d, N, HII_DIM, PIXEL_FACTOR, block=block_size, grid=small_grid_size) #subsample in real space
 	np.save(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc".format(HII_DIM, BOX_LEN), smallbox_d.get())
 
-	# This saves a large resolution deltax
-	# plan.execute(largebox_d, inverse=True)  #FFT to real space of unsmoothed box
-	# np.save(parent_folder+"/Boxes/deltax_z0.00_{%i}_{%.0f}Mpc".format(DIM, BOX_LEN), largebox_d.get())
+
+	largebox = np.load(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN))
+ 	largebox_d = gpuarray.to_gpu(largebox)
+ 	largebox_d /=  VOLUME  #divide by VOLUME when converting from k space to real space
 	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
 	largevbox_d = gpuarray.zeros((DIM,DIM,DIM), dtype=np.complex64)
 	smallvbox_d = gpuarray.zeros(HII_shape, dtype=np.float32)

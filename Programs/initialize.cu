@@ -71,7 +71,7 @@ __global__ void init_kernel(float* fourierbox, int w)
   while (s_K[ind]< k_mag){ ind++; }
   ps = s_P[ind-1] + (s_P[ind] - s_P[ind-1])*(k_mag - s_K[ind-1])/(s_K[ind] - s_K[ind-1]);
 
-  fourierbox[p] = sqrt(ps * %(PIX_VOLUME)s);
+  fourierbox[p] = sqrt(ps * %(VOLUME)s / 2.0);
 
 }
 
