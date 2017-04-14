@@ -23,7 +23,7 @@ Generates the initial conditions:
   """
 def init_pspec():
 	K = np.logspace(np.log10(DELTA_K/10), np.log10(DELTA_K*np.sqrt(3.)*DIM), BLOCK_VOLUME)
-	print K[0], K[-1]
+	#pspec from Eisenstein & Hu (1999 ApJ 511 5)
 	pspec = pb.power_spectrum(K, 0.0, **COSMO)
 	return np.vstack((K, pspec)).astype(np.float32), K.size
 
@@ -43,11 +43,13 @@ def init():
 	kernel_code = kernel_source % {
 
 		'DELTAK': DELTA_K,
-		'VOLUME': VOLUME
+		'VOLUME': VOLUME,
+		'DIM': DIM
 	}
 	main_module = nvcc.SourceModule(kernel_code)
 	init_kernel = main_module.get_function("init_kernel")
 	HII_filter = main_module.get_function("HII_filter")
+	adj_complex_conj = main_module.get_function("adj_complex_conj")
 	subsample_kernel = main_module.get_function("subsample")
 	velocity_kernel = main_module.get_function("set_velocity")
 	pspec_texture = main_module.get_texref("pspec")
@@ -58,30 +60,34 @@ def init():
 
 	largebox_d = gpuarray.zeros(shape, dtype=np.float32)
 	init_kernel(largebox_d, np.int32(DIM), block=block_size, grid=grid_size)
+	largebox_d_imag = gpuarray.zeros(shape, dtype=np.float32)
+	init_kernel(largebox_d_imag, np.int32(DIM), block=block_size, grid=grid_size)
 
-	largebox_d_imag = largebox_d.copy()
 	largebox_d *= MRGgen.gen_normal(shape, dtype=np.float32)
 	largebox_d_imag *= MRGgen.gen_normal(shape, dtype=np.float32)
 	largebox_d = largebox_d + np.complex64(1.j) * largebox_d_imag
-	np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), largebox_d.get())
+
+	adj_complex_conj(largebox_d, DIM, block=block_size, grid=grid_size)
+	np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), largebox_d.get_async())
 
 	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
 	HII_filter(largebox_d, N, ZERO, smoothR, block=block_size, grid=grid_size);
 	plan = Plan(shape, dtype=np.complex64)
 	plan.execute(largebox_d, inverse=True)  #FFT to real space of smoothed box
 	#largebox_d /=  VOLUME  #divide by VOLUME if using fft (vs ifft)
-	largebox_d *= scale**3
+	largebox_d /= scale**3
 
 	# This saves a large resolution deltax
-	# np.save(parent_folder+"/Boxes/deltax_z0.00_{%i}_{%.0f}Mpc".format(DIM, BOX_LEN), largebox_d.get())
+	np.save(parent_folder+"/Boxes/deltax_z0.00_{%i}_{%.0f}Mpc".format(DIM, BOX_LEN), largebox_d.get_async())
+
 	smallbox_d = gpuarray.zeros(HII_shape, dtype=np.float32)
 	subsample_kernel(largebox_d.real, smallbox_d, N, HII_DIM, PIXEL_FACTOR, block=block_size, grid=small_grid_size) #subsample in real space
-	np.save(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc".format(HII_DIM, BOX_LEN), smallbox_d.get())
+	np.save(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc".format(HII_DIM, BOX_LEN), smallbox_d.get_async())
 
 	# reload the k-space box
 	largebox = np.load(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN))
 	largebox_d = gpuarray.to_gpu(largebox)
-	largebox_d *= scale**3
+	largebox_d /= scale**3
 	#largebox_d /=  VOLUME  #divide by VOLUME if using fft (vs ifft)
 	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
 	largevbox_d = gpuarray.zeros((DIM,DIM,DIM), dtype=np.complex64)
@@ -91,7 +97,7 @@ def init():
 		HII_filter(largevbox_d, DIM, ZERO, smoothR, block=block_size, grid=grid_size)
 		plan.execute(largevbox_d, inverse=True)
 		subsample_kernel(largevbox_d.real, smallvbox_d, DIM, HII_DIM,PIXEL_FACTOR, block=block_size, grid=small_grid_size)
-		np.save(parent_folder+"/Boxes/v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallvbox_d.get())
+		np.save(parent_folder+"/Boxes/v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallvbox_d.get_async())
 
 	return
 
@@ -103,7 +109,8 @@ def init_stitch():
 	#HII_DIM = np.int32(HII_DIM)
 	f_pixel_factor = DIM/HII_DIM;
 	scale = np.float32(BOX_LEN/DIM)
-	HII_scale = np.float32(BOX_LEN)/HII_DIM
+	print 'scale', scale
+	HII_scale = np.float32(BOX_LEN/HII_DIM)
 	shape = (N,N,N)
 	#ratio of large box to small size
 	kernel_source = open(cmd_folder+"/initialize_stitch.cu").read()
@@ -120,6 +127,7 @@ def init_stitch():
 	subsample_kernel = main_module.get_function("subsample")
 	velocity_kernel = main_module.get_function("set_velocity")
 	pspec_texture = main_module.get_texref("pspec")
+	MRGgen = MRG32k3aRandomNumberGenerator(seed_getter=seed_getter_uniform, offset=0)
 
 	interpPspec, interpSize = init_pspec() #interpPspec contains both k array and P array
 	interp_cu = cuda.matrix_to_array(interpPspec, order='C')
@@ -128,26 +136,27 @@ def init_stitch():
 	#hbox_large = np.zeros((DIM, DIM, DIM), dtype=np.complex64)
 	hbox_small = np.zeros(HII_shape, dtype=np.float32)
 	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
+	largebox_d = gpuarray.zeros(shape, dtype=np.float32)
+	largebox_d_imag = gpuarray.zeros(shape, dtype=np.float32)
 	for meta_x in xrange(META_GRID_SIZE):
 		for meta_y in xrange(META_GRID_SIZE):
 			for meta_z in xrange(META_GRID_SIZE):
-				MRGgen = MRG32k3aRandomNumberGenerator(seed_getter=seed_getter_uniform, offset=meta_x*N**3)
-				largebox_d = gpuarray.zeros(shape, dtype=np.float32)
+				# MRGgen = MRG32k3aRandomNumberGenerator(seed_getter=seed_getter_uniform, offset=meta_x*N**3)
 				init_stitch(largebox_d, N, np.int32(meta_x), np.int32(meta_y), np.int32(meta_z),block=block_size, grid=grid_size)
-				largebox_d_imag = largebox_d.copy()
+				init_stitch(largebox_d_imag, N, np.int32(meta_x), np.int32(meta_y), np.int32(meta_z),block=block_size, grid=grid_size)
 				largebox_d *= MRGgen.gen_normal(shape, dtype=np.float32)
 				largebox_d_imag *= MRGgen.gen_normal(shape, dtype=np.float32)
 				largebox_d = largebox_d + np.complex64(1.j) * largebox_d_imag
 	#if want to get velocity need to use this
 	#np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), hbox_large)
 				HII_filter(largebox_d, N, np.int32(meta_x), np.int32(meta_y), np.int32(meta_z), ZERO, smoothR, block=block_size, grid=grid_size);
-				hbox_large[meta_x*N:(meta_x+1)*N, meta_y*N:(meta_y+1)*N, meta_z*N:(meta_z+1)*N] = largebox_d.get()
+				hbox_large[meta_x*N:(meta_x+1)*N, meta_y*N:(meta_y+1)*N, meta_z*N:(meta_z+1)*N] = largebox_d.get_async()
+	#import IPython; IPython.embed()
 	print "Executing FFT on host"
 	#hbox_large = hifft(hbox_large).astype(np.complex64).real
-	hbox_large = pyfftw.interfaces.numpy_fft.fftn(hbox_large).real
-	hbox_large *= scale**3
+	hbox_large = pyfftw.interfaces.numpy_fft.ifftn(hbox_large).real
 	print "Finished FFT on host"
-	
+	#import IPython; IPython.embed()
 
 	# for meta_x in xrange(META_GRID_SIZE):
 	# 	for meta_y in xrange(META_GRID_SIZE):
@@ -167,12 +176,12 @@ def init_stitch():
 	for meta_x in xrange(META_GRID_SIZE):
 		for meta_y in xrange(META_GRID_SIZE):
 			for meta_z in xrange(META_GRID_SIZE):
-				temp = hbox_large[meta_x*N:(meta_x+1)*N, meta_y*N:(meta_y+1)*N, meta_z*N:(meta_z+1)*N].copy()
-				largebox_d = gpuarray.to_gpu(temp)
+				largebox_d = gpuarray.to_gpu_async(hbox_large[meta_x*N:(meta_x+1)*N, meta_y*N:(meta_y+1)*N, meta_z*N:(meta_z+1)*N].copy())
+				largebox_d /= scale**3 #
 				subsample_kernel(largebox_d, smallbox_d, N, M, PIXEL_FACTOR, block=block_size, grid=small_grid_size) #subsample in real space
-				hbox_small[meta_x*M:(meta_x+1)*M, meta_y*M:(meta_y+1)*M, meta_z*M:(meta_z+1)*M] = smallbox_d.get()
+				hbox_small[meta_x*M:(meta_x+1)*M, meta_y*M:(meta_y+1)*M, meta_z*M:(meta_z+1)*M] = smallbox_d.get_async()
 	np.save(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc".format(HII_DIM, BOX_LEN), hbox_small)
-	import IPython; IPython.embed()
+	#import IPython; IPython.embed()
 	# To get velocities: reload the k-space box
 	# hbox_large = np.load(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN))
 	# largebox_d = gpuarray.to_gpu(largebox)
@@ -188,69 +197,7 @@ def init_stitch():
 	# 	np.save(parent_folder+"/Boxes/v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallvbox_d.get())
 
 	return
-def init_stitch_2():
-	"""this version first subsamples, and then compute fft on the HII
-	probably doesn't make sense. 
-	"""
-	N = np.int32(HII_DIM) #prepare for stitching
-	META_GRID_SIZE = DIM/N
-	M = np.int32(HII_DIM/META_GRID_SIZE)
-	#HII_DIM = np.int32(HII_DIM)
-	f_pixel_factor = DIM/HII_DIM;
-	scale = np.float32(BOX_LEN/DIM)
-	HII_scale = np.float32(BOX_LEN)/HII_DIM
-	shape = (N,N,N)
-	#ratio of large box to small size
-	kernel_source = open(cmd_folder+"/initialize_stitch.cu").read()
-	kernel_code = kernel_source % {
 
-		'DELTAK': DELTA_K,
-		'DIM': DIM, 
-		'VOLUME': VOLUME,
-		'META_BLOCKDIM': N
-	}
-	main_module = nvcc.SourceModule(kernel_code)
-	init_stitch = main_module.get_function("init_kernel")
-	HII_filter = main_module.get_function("HII_filter")
-	subsample_kernel = main_module.get_function("subsample_kspace")
-	velocity_kernel = main_module.get_function("set_velocity")
-	pspec_texture = main_module.get_texref("pspec")
-
-	interpPspec, interpSize = init_pspec() #interpPspec contains both k array and P array
-	interp_cu = cuda.matrix_to_array(interpPspec, order='C')
-	cuda.bind_array_to_texref(interp_cu, pspec_texture)
-
-	hbox_small = np.zeros(HII_shape, dtype=np.float32)
-	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
-	for meta_x in xrange(META_GRID_SIZE):
-		for meta_y in xrange(META_GRID_SIZE):
-			for meta_z in xrange(META_GRID_SIZE):
-				MRGgen = MRG32k3aRandomNumberGenerator(seed_getter=seed_getter_uniform, offset=meta_x*N**3)
-				largebox_d = gpuarray.zeros(shape, dtype=np.float32)
-				smallbox_d = gpuarray.zeros((M,M,M), dtype=np.complex64)
-				init_stitch(largebox_d, N, np.int32(meta_x), np.int32(meta_y), np.int32(meta_z),block=block_size, grid=grid_size)
-				largebox_d_imag = largebox_d.copy()
-				largebox_d *= MRGgen.gen_normal(shape, dtype=np.float32)
-				largebox_d_imag *= MRGgen.gen_normal(shape, dtype=np.float32)
-				largebox_d = largebox_d + np.complex64(1.j) * largebox_d_imag
-	#if want to get velocity need to use this
-	#np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), hbox_large)
-				HII_filter(largebox_d, N, np.int32(meta_x), np.int32(meta_y), np.int32(meta_z), ZERO, smoothR, block=block_size, grid=grid_size);
-				#TODO make sense if we can subsample with antialiasing window
-				subsample_kernel(largebox_d, smallbox_d, N, M, PIXEL_FACTOR, block=block_size, grid=small_grid_size) #subsample in real space
-				hbox_small[meta_x*M:(meta_x+1)*M, meta_y*M:(meta_y+1)*M, meta_z*M:(meta_z+1)*M] = smallbox_d.get()
-
-	plan = Plan(shape, dtype=np.complex64)
-	largebox_d = gpuarray.to_gpu(hbox_small)
-	plan.execute(largebox_d, inverse=True)  #FFT to real space of smoothed box
-	#largebox_d /=  VOLUME  #divide by VOLUME if using fft (vs ifft)
-	largebox_d *= scale**3
-
-	np.save(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc".format(HII_DIM, BOX_LEN), hbox_small)
-	import IPython; IPython.embed()
-	
-
-	return
 
 
 
@@ -270,4 +217,4 @@ def run():
 
 if __name__=="__main__":
 	run()
-	import IPython; IPython.embed()
+	#import IPython; IPython.embed()

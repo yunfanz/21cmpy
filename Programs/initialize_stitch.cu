@@ -80,8 +80,8 @@ __global__ void init_kernel(float* fourierbox, int w, int meta_x, int meta_y, in
   while (s_K[ind]< k_mag){ ind++; }
   ps = s_P[ind-1] + (s_P[ind] - s_P[ind-1])*(k_mag - s_K[ind-1])/(s_K[ind] - s_K[ind-1]);
 
-  //fourierbox[p] = sqrt(ps * %(VOLUME)s / 2.0);
-  fourierbox[p] = sqrt(ps * %(VOLUME)s );
+  fourierbox[p] = sqrt(ps * %(VOLUME)s / 2.0f);
+  //fourierbox[p] = sqrt(ps * %(VOLUME)s );
 }
 
 __global__ void subsample(float* largebox, float* smallbox, int w, int sw, float pixel_factor)
@@ -94,22 +94,6 @@ __global__ void subsample(float* largebox, float* smallbox, int w, int sw, float
   int lk = floor(k*pixel_factor + 0.5);
   int lj = floor(j*pixel_factor + 0.5);
   int li = floor(i*pixel_factor + 0.5);
-
-  if (j >= sw || i >= sw || k >= sw) return;
-  smallbox[p] = largebox[INDEX(lk,lj,li,w)];
-}
-
-__global__ void subsample_kspace(pycuda::complex<float>* largebox, pycuda::complex<float>* smallbox, int w, int sw, float pixel_factor)
-{
-  int tx = threadIdx.x;  int ty = threadIdx.y; int tz = threadIdx.z;
-  int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
-  int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
-  int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int p = INDEX(k,j,i,sw);
-  int hw = sw/2; 
-  int lk = (k>hw) ? w-k : k;
-  int lj = (j>hw) ? w-j : j;
-  int li = (i>hw) ? w-i : i;
 
   if (j >= sw || i >= sw || k >= sw) return;
   smallbox[p] = largebox[INDEX(lk,lj,li,w)];

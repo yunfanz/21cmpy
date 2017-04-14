@@ -2,6 +2,8 @@
 #define BLOCK_VOLUME 8*8*8
 #include <pycuda-complex.hpp>
 #define INDEX(k,j,i,ld) ((k)*ld*ld + (j) * ld + (i))
+#define DIM %(DIM)s
+#define MIDDLE %(DIM)s/2
 #define E (float) (2.7182818284)
 texture<float,2> pspec;
  __global__ void HII_filter(pycuda::complex<float>* fourierbox, int w, int filter_type, float R)
@@ -71,8 +73,42 @@ __global__ void init_kernel(float* fourierbox, int w)
   while (s_K[ind]< k_mag){ ind++; }
   ps = s_P[ind-1] + (s_P[ind] - s_P[ind-1])*(k_mag - s_K[ind-1])/(s_K[ind] - s_K[ind-1]);
 
-  //fourierbox[p] = sqrt(ps * %(VOLUME)s / 2.0);
-  fourierbox[p] = sqrt(ps * %(VOLUME)s );
+  fourierbox[p] = sqrt(ps * %(VOLUME)s / 2.0f);
+  //fourierbox[p] = sqrt(ps * %(VOLUME)s );
+}
+
+ /*****  Adjust the complex conjugate relations for a real array  *****/
+__global__ void adj_complex_conj(pycuda::complex<float>* box, int w)
+{
+  int tx = threadIdx.x;  int ty = threadIdx.y; int tz = threadIdx.z;
+  int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
+  int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
+  int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
+  int p = INDEX(k,j,i,w);
+
+  // corners
+  if ((i==0 || i==MIDDLE) && (j==0 || j==MIDDLE) && (k==0 || k==MIDDLE)) {
+    box[p] = real(box[p]);
+    return;
+  }
+  // do entire i except corners, just j, k corners
+  else if ( (i>=1 && i<MIDDLE) && (j==0 || j==MIDDLE) && (k==0 || k==MIDDLE) ){
+    box[p] = conj(box[INDEX(k,j,DIM-i,w)]);
+  }
+  // all of j
+  else if ( (i>=1 && i<MIDDLE) && (j>=1 && j<MIDDLE) && (k==0 || k==MIDDLE) ) {
+
+    box[p] = conj(box[INDEX(k,DIM-j,DIM-i,w)]);
+    box[INDEX(k,DIM-j,i,w)] = conj(box[INDEX(k,j,DIM-i,w)]);
+  } // end loop over i
+  // now the i corners
+  else if ( (i==1 || i==MIDDLE) && (j>=1 && j<MIDDLE) && (k==0 || k==MIDDLE) ){
+    box[p] = conj(box[INDEX(k,DIM-j,i,w)]);
+  }
+  else if (k>=1 && k< MIDDLE) {
+    box[p] = conj(box[INDEX[DIM-k, j, i]]);
+  }
+
 }
 
 __global__ void subsample(float* largebox, float* smallbox, int w, int sw, float pixel_factor)
