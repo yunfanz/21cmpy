@@ -46,10 +46,12 @@ def run(xHfile=None, IO_DIR=None):
 		p_dict = b.param_dict
 	Z = p_dict['z']
 	#growth_factor = pb.fgrowth(Z, COSMO['omega_M_0'], unnormed=True)
+	#overwrite global variables
 	HII_DIM = p_dict['dim']
 	BOX_LEN = np.float32(p_dict['BoxSize'])
 	DELTA_K = np.float32(2*np.pi/BOX_LEN)
 	VOLUME = (BOX_LEN*BOX_LEN*BOX_LEN)
+	HII_TOT_NUM_PIXELS = HII_DIM**3
 	try:
 		deltax = np.load(IO_DIR+"/Boxes/updated_smoothed_deltax_z0{0:.2f}_{1:d}_{2:.0f}Mpc.npy".format(Z, HII_DIM, BOX_LEN))
 	except:
@@ -70,7 +72,7 @@ def run(xHfile=None, IO_DIR=None):
 
 	_const_factor = np.float32(27 * (COSMO['omega_b_0']*COSMO['h']*COSMO['h']/0.023) * 
 		np.sqrt( (0.15/COSMO['omega_M_0']/COSMO['h']/COSMO['h']) * (1+Z)/10.0 ))
-	delta_T = np.float32(_const_factor*xH*(1.0+deltax))
+	delta_T = np.float32(_const_factor*xH*(1.0+deltax)) #in mK
 	ave = np.mean(delta_T)
 	np.save(IO_DIR+"/Boxes/delta_T_no_halos_z{0:.2f}_nf{1:f}_useTs{2:d}_zetaX{3:.1e}_TvirminX{4:.1e}_aveTb{5:.2f}_{6:d}_{7:d}Mpc.npy".format(Z, 
 		p_dict['nf'], USE_TS_IN_21CM, p_dict['eff'], ION_Tvir_MIN, ave, HII_DIM, int(BOX_LEN)), delta_T)
@@ -107,7 +109,7 @@ if __name__ == "__main__":
 	o.add_option('-i','--inter', dest='INTERACTIVE', action="store_true")
 	(opts, args) = o.parse_args()
 	k, kav, ps = run(args[0], opts.DIR)
-	delsq = k**3*ps/2/np.pi**2*1.e6
+	delsq = ps
 	plt.plot(k, delsq)
 	plt.xscale('log')
 	plt.yscale('log')
