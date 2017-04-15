@@ -10,21 +10,21 @@ __global__ void pbox_kernel(float* deldel_T, int w, float* ps, float* k_ave, flo
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
   int p = INDEX(k,j,i,w); int tp = INDEX(tz,ty,tx, bdx);
   if (j >= w || i >= w || k >= w) return;
-  float k_x, k_y, k_z, k_mag, ps;
+  float k_x, k_y, k_z, k_mag;
   int hw = w/2; 
   k_z = (k>hw) ? (k-w)*%(DELTAK)s : k*%(DELTAK)s;
   k_y = (j>hw) ? (j-w)*%(DELTAK)s : j*%(DELTAK)s;
   k_x = (i>hw) ? (i-w)*%(DELTAK)s : i*%(DELTAK)s;
 
   k_mag = sqrt(k_x*k_x + k_y*k_y + k_z*k_z);
-  __shared__ s_K[NUM_BINS];
+  __shared__ float s_K[NUM_BINS];
   if (tp < NUM_BINS) {s_K[tp] = K[tp]; }
 
   __syncthreads();
 
   int ct = 0;
   while (s_K[ct]< k_mag){ ct++; }
-  in_bin_ct[ct] += 1.
+  in_bin_ct[ct] += 1.;
   ps[ct] += pow(k_mag,float(3))*pow(abs(deldel_T[p]), float(2))/(2.0*PI*PI*%(VOLUME)s);
   k_ave[ct] += k_mag;
 }

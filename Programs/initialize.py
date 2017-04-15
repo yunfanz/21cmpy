@@ -81,7 +81,7 @@ def init():
 	np.save(parent_folder+"/Boxes/deltax_z0.00_{%i}_{%.0f}Mpc".format(DIM, BOX_LEN), largebox_d.get_async())
 
 	smallbox_d = gpuarray.zeros(HII_shape, dtype=np.float32)
-	subsample_kernel(largebox_d.real, smallbox_d, N, HII_DIM, PIXEL_FACTOR, block=block_size, grid=small_grid_size) #subsample in real space
+	subsample_kernel(largebox_d.real, smallbox_d, N, HII_DIM, PIXEL_FACTOR, block=block_size, grid=HII_grid_size) #subsample in real space
 	np.save(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc".format(HII_DIM, BOX_LEN), smallbox_d.get_async())
 
 	# reload the k-space box
@@ -96,7 +96,7 @@ def init():
 		velocity_kernel(largebox_d, largevbox_d, DIM, np.int32(num), block=block_size, grid=grid_size)
 		HII_filter(largevbox_d, DIM, ZERO, smoothR, block=block_size, grid=grid_size)
 		plan.execute(largevbox_d, inverse=True)
-		subsample_kernel(largevbox_d.real, smallvbox_d, DIM, HII_DIM,PIXEL_FACTOR, block=block_size, grid=small_grid_size)
+		subsample_kernel(largevbox_d.real, smallvbox_d, DIM, HII_DIM,PIXEL_FACTOR, block=block_size, grid=HII_grid_size)
 		np.save(parent_folder+"/Boxes/v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallvbox_d.get_async())
 
 	return
@@ -178,7 +178,7 @@ def init_stitch():
 			for meta_z in xrange(META_GRID_SIZE):
 				largebox_d = gpuarray.to_gpu_async(hbox_large[meta_x*N:(meta_x+1)*N, meta_y*N:(meta_y+1)*N, meta_z*N:(meta_z+1)*N].copy())
 				largebox_d /= scale**3 #
-				subsample_kernel(largebox_d, smallbox_d, N, M, PIXEL_FACTOR, block=block_size, grid=small_grid_size) #subsample in real space
+				subsample_kernel(largebox_d, smallbox_d, N, M, PIXEL_FACTOR, block=block_size, grid=HII_grid_size) #subsample in real space
 				hbox_small[meta_x*M:(meta_x+1)*M, meta_y*M:(meta_y+1)*M, meta_z*M:(meta_z+1)*M] = smallbox_d.get_async()
 	np.save(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc".format(HII_DIM, BOX_LEN), hbox_small)
 	#import IPython; IPython.embed()
