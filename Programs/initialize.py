@@ -103,17 +103,18 @@ def init():
 
 	return
 
-def fft_stitch(N, plan2d, plan1d, hostarr):
+def fft_stitch(N, plan2d, plan1d, hostarr, largebox_d):
 	w = hostarr.shape[0]
-	META_GRID_SIZE = d/N
-	fftbatch = 8
+	META_GRID_SIZE = w/N
+	fftbatch = 2
 	for meta_z in xrange(META_GRID_SIZE): #fft along x
 		largebox_d = gpuarray.to_gpu_async(hostarr[:, :, meta_z*N:(meta_z+1)*N].transpose(1,2,0))
+		#print largebox_d.shape
 		plan1d.execute(largebox_d, batch=fftbatch)
 		hostarr[:, :, meta_z*N:(meta_z+1)*N] = largebox_d.real.get_async().transpose(2,0,1)
 	for meta_x in xrange(META_GRID_SIZE): #fft along y, z
 		largebox_d = gpuarray.to_gpu_async(hostarr[meta_x*N:(meta_x+1)*N, :, :].copy())
-		plan2d.execute(largebox_d, batch=fftbatch*w)
+		plan2d.execute(largebox_d, batch=fftbatch)
 		hostarr[meta_x*N:(meta_x+1)*N, :, :] = largebox_d.real.get_async()
 	return hostarr
 
@@ -160,19 +161,19 @@ def init_stitch(N):
 	velocity_kernel = main_module.get_function("set_velocity")
 	pspec_texture = main_module.get_texref("pspec")
 	MRGgen = MRG32k3aRandomNumberGenerator(seed_getter=seed_getter_uniform, offset=0)
-	plan2d = Plan((DIM, DIM), dtype=np.complex64)
-	plan1d = Plan((DIM), dtype=np.complex64)
-
+	plan2d = Plan((np.int64(DIM), np.int64(DIM)), dtype=np.complex64)
+	plan1d = Plan((np.int64(DIM)), dtype=np.complex64)
+	print "init pspec"
 	interpPspec, interpSize = init_pspec() #interpPspec contains both k array and P array
 	interp_cu = cuda.matrix_to_array(interpPspec, order='C')
 	cuda.bind_array_to_texref(interp_cu, pspec_texture)
-	hbox_large = pyfftw.empty_aligned((DIM, DIM, DIM), dtype='complex64')
-	#hbox_large = np.zeros((DIM, DIM, DIM), dtype=np.complex64)
+	#hbox_large = pyfftw.empty_aligned((DIM, DIM, DIM), dtype='complex64')
+	hbox_large = np.zeros((DIM, DIM, DIM), dtype=np.complex64)
 	hbox_small = np.zeros(HII_shape, dtype=np.float32)
 	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
 	largebox_d = gpuarray.zeros(shape, dtype=np.float32)
 	largebox_d_imag = gpuarray.zeros(shape, dtype=np.float32)
-
+	print "init boxes"
 	for meta_z in xrange(META_GRID_SIZE):
 		# MRGgen = MRG32k3aRandomNumberGenerator(seed_getter=seed_getter_uniform, offset=meta_x*N**3)
 		init_stitch(largebox_d, DIM, np.int32(meta_z),block=block_size, grid=stitch_grid_size)
@@ -182,16 +183,17 @@ def init_stitch(N):
 		largebox_d = largebox_d + np.complex64(1.j) * largebox_d_imag
 		hbox_large[:, :, meta_z*N:(meta_z+1)*N] = largebox_d.get_async()
 	#if want to get velocity need to use this
-	np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), hbox_large)
+	np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN), hbox_large)
 
 	print "Executing FFT on device"
 	#hbox_large = pyfftw.interfaces.numpy_fft.ifftn(hbox_large).real
-	hbox_large = fft_stitch(N, plan2d, plan1d, hbox_large).real
+	hbox_large = fft_stitch(N, plan2d, plan1d, hbox_large, largebox_d).real
 	print hbox_large.dtype
 	print "Finished FFT on device"
-	np.save(parent_folder+"/Boxes/deltax_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), hbox_large)
+	np.save(parent_folder+"/Boxes/deltax_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN), hbox_large)
+	return
 
-	hbox_large = np.load(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN))
+	hbox_large = np.load(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN))
 	for meta_z in xrange(META_GRID_SIZE):
 		largebox_d = gpuarray.to_gpu_async(hbox_large[:, :, meta_z*N:(meta_z+1)*N].copy())
 		HII_filter(largebox_d, DIM, np.int32(meta_z), ZERO, smoothR, block=block_size, grid=stitch_grid_size);
@@ -200,7 +202,7 @@ def init_stitch(N):
 	print "Executing FFT on host"
 	#hbox_large = hifft(hbox_large).astype(np.complex64).real
 	#hbox_large = pyfftw.interfaces.numpy_fft.ifftn(hbox_large).real
-	hbox_large = fft_stitch(N, plan2d, plan1d, hbox_large).real
+	hbox_large = fft_stitch(N, plan2d, plan1d, hbox_large, largebox_d).real
 	print "Finished FFT on host"
 	#import IPython; IPython.embed()
 
@@ -218,12 +220,12 @@ def init_stitch(N):
 	# This saves a large resolution deltax
 
 	
-
+	print "downsampling"
 	smallbox_d = gpuarray.zeros((HII_DIM,HII_DIM,M), dtype=np.float32)
 	for meta_z in xrange(META_GRID_SIZE):
 		largebox_d = gpuarray.to_gpu_async(hbox_large[:, :, meta_z*N:(meta_z+1)*N].copy())
 		largebox_d /= scale**3 #
-		subsample_kernel(largebox_d, smallbox_d, N, M, PIXEL_FACTOR, block=block_size, grid=HII_stitch_grid_size) #subsample in real space
+		subsample_kernel(largebox_d, smallbox_d, DIM, HII_DIM, PIXEL_FACTOR, block=block_size, grid=HII_stitch_grid_size) #subsample in real space
 		hbox_small[:, :, meta_z*M:(meta_z+1)*M] = smallbox_d.get_async()
 	np.save(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc".format(HII_DIM, BOX_LEN), hbox_small)
 	#import IPython; IPython.embed()
@@ -257,10 +259,10 @@ def run():
 		init()
 	else:
 		N = DIM
-		while float(N)/DIM*NBYTES*8 > free:
+		while float(N)/DIM*NBYTES*32 > free:
 			N /= 2
 		print "Stitching with {} meta block size".format(N)
-		init_stitch(np.int32(N))
+		init_stitch(np.int32(128))
 	#step2()
 
 if __name__=="__main__":
