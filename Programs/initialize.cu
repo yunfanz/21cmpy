@@ -106,7 +106,8 @@ __global__ void adj_complex_conj(pycuda::complex<float>* box, int w)
     box[p] = conj(box[INDEX(k,DIM-j,i,w)]);
   }
   else if (k>=1 && k< MIDDLE) {
-    box[p] = conj(box[INDEX[DIM-k, j, i]]);
+    //box[p] = conj(box[INDEX(DIM-k, j, i, w)]);
+    box[p] = 0.0;
   }
 
 }

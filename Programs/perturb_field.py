@@ -31,13 +31,41 @@ from pyfft.cuda import Plan
 from pycuda.tools import make_default_context
 from IO_utils import *
 #print cmd_folder
-from ..cosmo_files import *
+#from ..cosmo_files import *
+from cosmo_functions import *
 from ..Parameter_files import *
 
-def evolve_linear(z, IN='numpy'):
+def evolve_linear(z, deltax):
 	"""
 	Input type IN must be numpy or 21cmfast
 	"""
+	
+	fgrowth = pb.fgrowth(z, cosmo['omega_M_0']) #normalized to 1 at z=0
+	#primordial_fgrowth = pb.fgrowth(INITIAL_REDSHIFT, cosmo['omega_M_0']) #normalized to 1 at z=0
+	
+
+	updated = deltax*fgrowth
+		
+	np.save(parent_folder+"/Boxes/updated_smoothed_deltax_z{0:.00f}_{1:d}_{2:.0f}Mpc".format(z, HII_DIM, BOX_LEN), updated)
+
+
+	if False: #velocity information may not be useful for linear field
+		plan = Plan(HII_shape, dtype=np.complex64)
+		deltak_d = deltax_d.astype(np.complex64)
+		vbox_d = gpuarray.zeros_like(deltak_d)
+		plan.execute(deltak_d)
+		dDdt_D = np.float32(dDdt_D(z))
+		for num, mode in enumerate(['x', 'y', 'z']):
+			velocity_kernel(deltak_d, vbox_d, dDdt_D, DIM, np.int32(num), block=block_size, grid=grid_size)
+			np.save(parent_folder+"/Boxes/updated_v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallvbox_d.get())
+
+	return
+
+def evolve_zeldovich(z, deltax):
+	"""First order Zeldovich approximation. """
+	if BOX_LEN > DIM:
+		print "perturb_field: WARNING: Resolution is likely too low for accurate evolved density fields"
+	#move_mass(updated_d, deltax_d, vx_d, vy_d, vz_d, np.float32(1./primordial_fgrowth))
 	kernel_source = open(cmd_folder+"/perturb_field.cu").read()
 	kernel_code = kernel_source % {
 
@@ -49,43 +77,58 @@ def evolve_linear(z, IN='numpy'):
 	main_module = nvcc.SourceModule(kernel_code)
 	move_mass = main_module.get_function("move_mass")
 	velocity_kernel = main_module.get_function("set_velocity")
-	fgrowth = np.float32(1./pb.fgrowth(z, cosmo['omega_M_0'])) #normalized to 1 at z=0
-	primordial_fgrowth = np.float32(1./pb.fgrowth(INITIAL_REDSHIFT, cosmo['omega_M_0'])) #normalized to 1 at z=0
-	if IN == 'numpy':
-		deltax =  np.load(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc.npy".format(HII_DIM, BOX_LEN))
-	elif IN == '21cmfast':
-		deltax =  boxio.readbox(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc".format(HII_DIM, BOX_LEN)).box_data
+
+	fgrowth = pb.fgrowth(z, cosmo['omega_M_0']) #normalized to 1 at z=0
+	primordial_fgrowth = pb.fgrowth(INITIAL_REDSHIFT, cosmo['omega_M_0']) #normalized to 1 at z=0
+
+	vx = np.load(parent_folder+"/Boxes/vxoverddot_{0:d}_{1:.0f}Mpc.npy".format(HII_DIM, BOX_LEN))
+	vy = np.load(parent_folder+"/Boxes/vyoverddot_{0:d}_{1:.0f}Mpc.npy".format(HII_DIM, BOX_LEN))
+	vz = np.load(parent_folder+"/Boxes/vzoverddot_{0:d}_{1:.0f}Mpc.npy".format(HII_DIM, BOX_LEN))
+	vx_d = gpuarray.to_gpu(vx)
+	vy_d = gpuarray.to_gpu(vy)
+	vz_d = gpuarray.to_gpu(vz)
+	vx_d *= ((fgrowth-primordial_fgrowth) / BOX_LEN)
+	vy_d *= ((fgrowth-primordial_fgrowth) / BOX_LEN)
+	vz_d *= ((fgrowth-primordial_fgrowth) / BOX_LEN)
+
+	updated_d = gpuarray.zeros_like(vx_d)
 	deltax_d = gpuarray.to_gpu(deltax)
-	updated_d = deltax_d.copy()/fgrowth
-		
-	np.save(parent_folder+"/Boxes/updated_smoothed_deltax_z{0:.00f}_{1:d}_{2:.0f}Mpc".format(z, HII_DIM, BOX_LEN), updated_d.get())
+
+	move_mass(updated_d, deltax_d, vx_d, vy_d, vz_d, primordial_fgrowth, block=block_size, grid=grid_size)
+	updated_d /= MASS_FACTOR
+	updated_d -= np.float32(1.) #renormalize to the new pixel size, and make into delta
+	np.save(parent_folder+"/Boxes/updated_smoothed_deltax_z{0:.00f}_{1:d}_{2:.0f}Mpc".format(z, HII_DIM, BOX_LEN), updated)
 
 
-	if False:
-		plan = Plan(HII_shape, dtype=np.complex64)
-		deltak_d = deltax_d.astype(np.complex64)
-		vbox_d = gpuarray.zeros_like(deltak_d)
-		plan.execute(deltak_d)
-		dDdt_D = np.float32(1)
-		for num, mode in enumerate(['x', 'y', 'z']):
-			velocity_kernel(deltak_d, vbox_d, dDdt_D, DIM, np.int32(num), block=block_size, grid=grid_size)
-			np.save(parent_folder+"/Boxes/updated_v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallvbox_d.get())
-
-	return
-
-def evolve_zeldovich(z, IN='numpy'):
-	if BOX_LEN > DIM:
-		print "perturb_field: WARNING: Resolution is likely too low for accurate evolved density fields"
-	#move_mass(updated_d, deltax_d, vx_d, vy_d, vz_d, np.float32(1./primordial_fgrowth))
-	raise Exception("Not yet implemented")
+	plan = Plan(HII_shape, dtype=np.complex64)
+	vbox_d = gpuarray.zeros_like(deltax_d)
+	smallvbox_d = gpuarray.zeros(HII_shape, dtype=np.float32)
+	plan.execute(deltax_d) #now deltak
+	dDdt_D = np.float32(dDdt_D(z))
+	for num, mode in enumerate(['x', 'y', 'z']):
+		velocity_kernel(deltax_d, vbox_d, dDdt_D, DIM, np.int32(num), block=block_size, grid=grid_size)
+		HII_filter(vbox_d, DIM, ZERO, smoothR, block=block_size, grid=grid_size)
+		plan.execute(largevbox_d, inverse=True)
+		subsample_kernel(vbox_d.real, smallvbox_d, DIM, HII_DIM,PIXEL_FACTOR, block=block_size, grid=HII_grid_size)
+		np.save(parent_folder+"/Boxes/updated_v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallvbox_d.get())
 
 	return
 
-def run(z, IN='numpy'):
+def run(z):
+	
+	
 	if EVOLVE_DENSITY_LINEARLY:
-		evolve_linear(z,IN)
+		try:
+			deltax =  np.load(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc.npy".format(HII_DIM, BOX_LEN))
+		except:
+			deltax =  boxio.readbox(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc".format(HII_DIM, BOX_LEN)).box_data
+		evolve_linear(z,deltax)
 	else:
-		evolve_zeldovich(z,IN)
+		try:
+			deltax =  np.load(parent_folder+"/Boxes/deltax_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN))
+		except:
+			deltax =  boxio.readbox(parent_folder+"/Boxes/deltax_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN)).box_data
+		evolve_zeldovich(z,deltax)
 
 if __name__=='__main__':
 	z = 12.

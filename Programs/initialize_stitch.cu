@@ -7,14 +7,14 @@
 #define E (float) (2.7182818284)
 texture<float,2> pspec;
 
- __global__ void HII_filter(pycuda::complex<float>* fourierbox, int w, int meta_x, int meta_y, int meta_z, int filter_type, float R)
+ __global__ void HII_filter(pycuda::complex<float>* fourierbox, int w, int meta_z, int filter_type, float R)
 {
   int tx = threadIdx.x;  int ty = threadIdx.y; int tz = threadIdx.z;
   int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
   int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int meta_i = meta_x*META_DIM + i;
-  int meta_j = meta_y*META_DIM + j;
+  int meta_i = i;
+  int meta_j = j;
   int meta_k = meta_z*META_DIM + k;
   int p = INDEX(k,j,i,w);
   if (j >= w || i >= w || k >= w) return;
@@ -43,14 +43,14 @@ texture<float,2> pspec;
 }
 
 
-__global__ void init_kernel(float* fourierbox, int w, int meta_x, int meta_y, int meta_z)
+__global__ void init_kernel(float* fourierbox, int w, int meta_z)
 {
   int tx = threadIdx.x;  int ty = threadIdx.y; int tz = threadIdx.z;
   int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
   int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int meta_i = meta_x*META_DIM + i;
-  int meta_j = meta_y*META_DIM + j;
+  int meta_i = i;
+  int meta_j = j;
   int meta_k = meta_z*META_DIM + k;
   int p = INDEX(k,j,i,w); int tp = INDEX(tz,ty,tx, bdx);
   if (j >= w || i >= w || k >= w) return;
