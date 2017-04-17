@@ -10,7 +10,8 @@ from IO_utils import *
 #print cmd_folder
 from ..cosmo_files import *
 from ..Parameter_files import *
-import pyfftw
+#import pyfftw
+
 """
 Generates the initial conditions:
   gaussian random density field (DIM^3)
@@ -35,7 +36,6 @@ def init():
 	scale = np.float32(BOX_LEN)/DIM
 	HII_scale = np.float32(BOX_LEN)/HII_DIM
 	shape = (N,N,N)
-	#ratio of large box to small size
 	
 	MRGgen = MRG32k3aRandomNumberGenerator(seed_getter=seed_getter_uniform, offset=0)
 
@@ -67,9 +67,9 @@ def init():
 	largebox_d_imag *= MRGgen.gen_normal(shape, dtype=np.float32)
 	largebox_d = largebox_d + np.complex64(1.j) * largebox_d_imag
 
-	adj_complex_conj(largebox_d, DIM, block=block_size, grid=grid_size)
+	#adj_complex_conj(largebox_d, DIM, block=block_size, grid=grid_size)
 	largebox = largebox_d.get_async()
-	np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), largebox)
+	#np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), largebox)
 
 	#save real space box before smoothing
 	plan = Plan(shape, dtype=np.complex64)
@@ -77,7 +77,7 @@ def init():
 	np.save(parent_folder+"/Boxes/deltax_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), largebox_d.get_async())
 
 	#save real space box after smoothing and subsampling
-	# host largebox is still in k space, no need to reload
+	# host largebox is still in k space, no need to reload from disk
 	largebox_d = gpuarray.to_gpu(largebox)
 	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
 	HII_filter(largebox_d, N, ZERO, smoothR, block=block_size, grid=grid_size);
@@ -102,6 +102,22 @@ def init():
 		np.save(parent_folder+"/Boxes/v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallbox_d.get_async())
 
 	return
+
+def fft_stitch(N, plan2d, plan1d, hostarr):
+	w = hostarr.shape[0]
+	META_GRID_SIZE = d/N
+	fftbatch = 8
+	for meta_z in xrange(META_GRID_SIZE): #fft along x
+		largebox_d = gpuarray.to_gpu_async(hostarr[:, :, meta_z*N:(meta_z+1)*N].transpose(1,2,0))
+		plan1d.execute(largebox_d, batch=fftbatch)
+		hostarr[:, :, meta_z*N:(meta_z+1)*N] = largebox_d.real.get_async().transpose(2,0,1)
+	for meta_x in xrange(META_GRID_SIZE): #fft along y, z
+		largebox_d = gpuarray.to_gpu_async(hostarr[meta_x*N:(meta_x+1)*N, :, :].copy())
+		plan2d.execute(largebox_d, batch=fftbatch*w)
+		hostarr[meta_x*N:(meta_x+1)*N, :, :] = largebox_d.real.get_async()
+	return hostarr
+
+
 
 def init_stitch(N):
 	"""outputs the high resolution k-box, and the smoothed r box
@@ -144,6 +160,8 @@ def init_stitch(N):
 	velocity_kernel = main_module.get_function("set_velocity")
 	pspec_texture = main_module.get_texref("pspec")
 	MRGgen = MRG32k3aRandomNumberGenerator(seed_getter=seed_getter_uniform, offset=0)
+	plan2d = Plan((DIM, DIM), dtype=np.complex64)
+	plan1d = Plan((DIM), dtype=np.complex64)
 
 	interpPspec, interpSize = init_pspec() #interpPspec contains both k array and P array
 	interp_cu = cuda.matrix_to_array(interpPspec, order='C')
@@ -166,9 +184,11 @@ def init_stitch(N):
 	#if want to get velocity need to use this
 	np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), hbox_large)
 
-	print "Executing FFT on host"
-	hbox_large = pyfftw.interfaces.numpy_fft.ifftn(hbox_large).real
-	print "Finished FFT on host"
+	print "Executing FFT on device"
+	#hbox_large = pyfftw.interfaces.numpy_fft.ifftn(hbox_large).real
+	hbox_large = fft_stitch(N, plan2d, plan1d, hbox_large).real
+	print hbox_large.dtype
+	print "Finished FFT on device"
 	np.save(parent_folder+"/Boxes/deltax_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), hbox_large)
 
 	hbox_large = np.load(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN))
@@ -179,7 +199,8 @@ def init_stitch(N):
 	#import IPython; IPython.embed()
 	print "Executing FFT on host"
 	#hbox_large = hifft(hbox_large).astype(np.complex64).real
-	hbox_large = pyfftw.interfaces.numpy_fft.ifftn(hbox_large).real
+	#hbox_large = pyfftw.interfaces.numpy_fft.ifftn(hbox_large).real
+	hbox_large = fft_stitch(N, plan2d, plan1d, hbox_large).real
 	print "Finished FFT on host"
 	#import IPython; IPython.embed()
 

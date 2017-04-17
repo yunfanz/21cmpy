@@ -80,8 +80,8 @@ __global__ void init_kernel(float* fourierbox, int w, int meta_z)
   while (s_K[ind]< k_mag){ ind++; }
   ps = s_P[ind-1] + (s_P[ind] - s_P[ind-1])*(k_mag - s_K[ind-1])/(s_K[ind] - s_K[ind-1]);
 
-  fourierbox[p] = sqrt(ps * %(VOLUME)s / 2.0f);
-  //fourierbox[p] = sqrt(ps * %(VOLUME)s );
+  //fourierbox[p] = sqrt(ps * %(VOLUME)s / 2.0f);//use this one if adj_complex
+  fourierbox[p] = sqrt(ps * %(VOLUME)s );
 }
 
 __global__ void subsample(float* largebox, float* smallbox, int w, int sw, float pixel_factor)

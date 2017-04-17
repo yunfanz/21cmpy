@@ -73,8 +73,8 @@ __global__ void init_kernel(float* fourierbox, int w)
   while (s_K[ind]< k_mag){ ind++; }
   ps = s_P[ind-1] + (s_P[ind] - s_P[ind-1])*(k_mag - s_K[ind-1])/(s_K[ind] - s_K[ind-1]);
 
-  fourierbox[p] = sqrt(ps * %(VOLUME)s / 2.0f);
-  //fourierbox[p] = sqrt(ps * %(VOLUME)s );
+  //fourierbox[p] = sqrt(ps * %(VOLUME)s / 2.0f); //use this one if adj_complex
+  fourierbox[p] = sqrt(ps * %(VOLUME)s );
 }
 
  /*****  Adjust the complex conjugate relations for a real array  *****/
@@ -95,7 +95,7 @@ __global__ void adj_complex_conj(pycuda::complex<float>* box, int w)
   else if ( (i>=1 && i<MIDDLE) && (j==0 || j==MIDDLE) && (k==0 || k==MIDDLE) ){
     box[p] = conj(box[INDEX(k,j,DIM-i,w)]);
   }
-  // all of j
+  // rest of j
   else if ( (i>=1 && i<MIDDLE) && (j>=1 && j<MIDDLE) && (k==0 || k==MIDDLE) ) {
 
     box[p] = conj(box[INDEX(k,DIM-j,DIM-i,w)]);
@@ -111,6 +111,7 @@ __global__ void adj_complex_conj(pycuda::complex<float>* box, int w)
   }
 
 }
+
 
 __global__ void subsample(float* largebox, float* smallbox, int w, int sw, float pixel_factor)
 {
