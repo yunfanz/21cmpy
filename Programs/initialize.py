@@ -8,8 +8,10 @@ from pyfft.cuda import Plan
 from pycuda.tools import make_default_context
 from IO_utils import *
 #print cmd_folder
-from ..cosmo_files import *
+#from ..cosmo_files import *
 from ..Parameter_files import *
+import resource
+from cosmo_functions import *
 #import pyfftw
 
 """
@@ -55,11 +57,12 @@ def init():
 	pspec_texture = main_module.get_texref("pspec")
 
 	interpPspec, interpSize = init_pspec() #interpPspec contains both k array and P array
-	interp_cu = cuda.matrix_to_array(interpPspec, order='C')
+	interp_cu = cuda.matrix_to_array(interpPspec, order='F')
 	cuda.bind_array_to_texref(interp_cu, pspec_texture)
 
 	largebox_d = gpuarray.zeros(shape, dtype=np.float32)
 	init_kernel(largebox_d, np.int32(DIM), block=block_size, grid=grid_size)
+	#import IPython; IPython.embed()
 	largebox_d_imag = gpuarray.zeros(shape, dtype=np.float32)
 	init_kernel(largebox_d_imag, np.int32(DIM), block=block_size, grid=grid_size)
 
@@ -68,13 +71,14 @@ def init():
 	largebox_d = largebox_d + np.complex64(1.j) * largebox_d_imag
 
 	#adj_complex_conj(largebox_d, DIM, block=block_size, grid=grid_size)
-	largebox = largebox_d.get_async()
+	largebox = largebox_d.get()
 	#np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), largebox)
 
 	#save real space box before smoothing
 	plan = Plan(shape, dtype=np.complex64)
 	plan.execute(largebox_d, inverse=True)  #FFT to real space of smoothed box
-	np.save(parent_folder+"/Boxes/deltax_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), largebox_d.get_async())
+	largebox_d /= scale**3
+	np.save(parent_folder+"/Boxes/deltax_z0.00_{0:d}_{1:.0f}Mpc".format(DIM, BOX_LEN), largebox_d.real.get_async())
 
 	#save real space box after smoothing and subsampling
 	# host largebox is still in k space, no need to reload from disk
@@ -89,7 +93,7 @@ def init():
 
 	# reload the k-space box for velocity boxes
 	largebox_d = gpuarray.to_gpu(largebox)
-	largebox_d /= scale**3
+	
 	#largebox_d /=  VOLUME  #divide by VOLUME if using fft (vs ifft)
 	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
 	largevbox_d = gpuarray.zeros((DIM,DIM,DIM), dtype=np.complex64)
@@ -98,6 +102,7 @@ def init():
 		velocity_kernel(largebox_d, largevbox_d, DIM, np.int32(num), block=block_size, grid=grid_size)
 		HII_filter(largevbox_d, DIM, ZERO, smoothR, block=block_size, grid=grid_size)
 		plan.execute(largevbox_d, inverse=True)
+		largevbox_d /= scale**3
 		subsample_kernel(largevbox_d.real, smallbox_d, DIM, HII_DIM,PIXEL_FACTOR, block=block_size, grid=HII_grid_size)
 		np.save(parent_folder+"/Boxes/v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallbox_d.get_async())
 
@@ -110,11 +115,11 @@ def fft_stitch(N, plan2d, plan1d, hostarr, largebox_d):
 	for meta_z in xrange(META_GRID_SIZE): #fft along x
 		largebox_d = gpuarray.to_gpu_async(hostarr[:, :, meta_z*N:(meta_z+1)*N].transpose(1,2,0))
 		#print largebox_d.shape
-		plan1d.execute(largebox_d, batch=fftbatch)
+		plan1d.execute(largebox_d, batch=fftbatch, inverse=True)
 		hostarr[:, :, meta_z*N:(meta_z+1)*N] = largebox_d.real.get_async().transpose(2,0,1)
 	for meta_x in xrange(META_GRID_SIZE): #fft along y, z
 		largebox_d = gpuarray.to_gpu_async(hostarr[meta_x*N:(meta_x+1)*N, :, :].copy())
-		plan2d.execute(largebox_d, batch=fftbatch)
+		plan2d.execute(largebox_d, batch=fftbatch, inverse=True)
 		hostarr[meta_x*N:(meta_x+1)*N, :, :] = largebox_d.real.get_async()
 	return hostarr
 
@@ -165,12 +170,19 @@ def init_stitch(N):
 	plan1d = Plan((np.int64(DIM)), dtype=np.complex64)
 	print "init pspec"
 	interpPspec, interpSize = init_pspec() #interpPspec contains both k array and P array
-	interp_cu = cuda.matrix_to_array(interpPspec, order='C')
+	interp_cu = cuda.matrix_to_array(interpPspec, order='F')
 	cuda.bind_array_to_texref(interp_cu, pspec_texture)
 	#hbox_large = pyfftw.empty_aligned((DIM, DIM, DIM), dtype='complex64')
 	hbox_large = np.zeros((DIM, DIM, DIM), dtype=np.complex64)
-	hbox_small = np.zeros(HII_shape, dtype=np.float32)
+	#hbox_small = np.zeros(HII_shape, dtype=np.float32)
+	#hbox_large = n
 	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
+
+	# Set up pinned memory for transfer
+	#largebox_hs = cuda.aligned_empty(shape=shape, dtype=np.float32, alignment=resource.getpagesize())
+	largebox_pin = cuda.pagelocked_empty(shape=shape, dtype=np.float32)
+	largecbox_pin = cuda.pagelocked_empty(shape=shape, dtype=np.complex64)
+
 	largebox_d = gpuarray.zeros(shape, dtype=np.float32)
 	largebox_d_imag = gpuarray.zeros(shape, dtype=np.float32)
 	print "init boxes"
@@ -181,9 +193,12 @@ def init_stitch(N):
 		largebox_d *= MRGgen.gen_normal(shape, dtype=np.float32)
 		largebox_d_imag *= MRGgen.gen_normal(shape, dtype=np.float32)
 		largebox_d = largebox_d + np.complex64(1.j) * largebox_d_imag
-		hbox_large[:, :, meta_z*N:(meta_z+1)*N] = largebox_d.get_async()
+		cuda.memcpy_dtoh_async(largecbox_pin, largebox_d)
+		hbox_large[:, :, meta_z*N:(meta_z+1)*N] = largecbox_pin.copy()
 	#if want to get velocity need to use this
-	np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN), hbox_large)
+	if True:
+		print "saving kbox"
+		np.save(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN), hbox_large)
 
 	print "Executing FFT on device"
 	#hbox_large = pyfftw.interfaces.numpy_fft.ifftn(hbox_large).real
@@ -191,10 +206,13 @@ def init_stitch(N):
 	print hbox_large.dtype
 	print "Finished FFT on device"
 	np.save(parent_folder+"/Boxes/deltax_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN), hbox_large)
-	return
-
-	hbox_large = np.load(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN))
+	
+	if True:
+		print "loading kbox"
+		hbox_large = np.load(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN))
 	for meta_z in xrange(META_GRID_SIZE):
+		largebox_pin = hbox_large[:, :, meta_z*N:(meta_z+1)*N].copy()
+		#cuda.memcpy_htod_async(largebox_d, largebox_pin)
 		largebox_d = gpuarray.to_gpu_async(hbox_large[:, :, meta_z*N:(meta_z+1)*N].copy())
 		HII_filter(largebox_d, DIM, np.int32(meta_z), ZERO, smoothR, block=block_size, grid=stitch_grid_size);
 		hbox_large[:, :, meta_z*N:(meta_z+1)*N] = largebox_d.get_async()
@@ -223,25 +241,37 @@ def init_stitch(N):
 	print "downsampling"
 	smallbox_d = gpuarray.zeros((HII_DIM,HII_DIM,M), dtype=np.float32)
 	for meta_z in xrange(META_GRID_SIZE):
-		largebox_d = gpuarray.to_gpu_async(hbox_large[:, :, meta_z*N:(meta_z+1)*N].copy())
+		largebox_pin = hbox_large[:, :, meta_z*N:(meta_z+1)*N].copy()
+		cuda.memcpy_dtoh_async(largecbox_pin, largebox_d)
+		#largebox_d = gpuarray.to_gpu_async(hbox_large[:, :, meta_z*N:(meta_z+1)*N].copy())
 		largebox_d /= scale**3 #
 		subsample_kernel(largebox_d, smallbox_d, DIM, HII_DIM, PIXEL_FACTOR, block=block_size, grid=HII_stitch_grid_size) #subsample in real space
 		hbox_small[:, :, meta_z*M:(meta_z+1)*M] = smallbox_d.get_async()
 	np.save(parent_folder+"/Boxes/smoothed_deltax_z0.00_{0:d}_{1:.0f}Mpc".format(HII_DIM, BOX_LEN), hbox_small)
 	#import IPython; IPython.embed()
+
+
 	# To get velocities: reload the k-space box
-	# hbox_large = np.load(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN))
-	# largebox_d = gpuarray.to_gpu(largebox)
-	# #largebox_d /=  VOLUME  #divide by VOLUME if using fft (vs ifft)
-	# smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
-	# largevbox_d = gpuarray.zeros((DIM,DIM,DIM), dtype=np.complex64)
-	# smallvbox_d = gpuarray.zeros(HII_shape, dtype=np.float32)
-	# for num, mode in enumerate(['x', 'y', 'z']):
-	# 	velocity_kernel(largebox_d, largevbox_d, DIM, np.int32(num), block=block_size, grid=grid_size)
-	# 	HII_filter(largevbox_d, DIM, ZERO, smoothR, block=block_size, grid=grid_size)
-	# 	plan.execute(largevbox_d, inverse=True)
-	# 	subsample_kernel(largevbox_d.real, smallvbox_d, DIM, HII_DIM,PIXEL_FACTOR, block=block_size, grid=small_grid_size)
-	# 	np.save(parent_folder+"/Boxes/v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallvbox_d.get())
+	hbox_large = np.load(parent_folder+"/Boxes/deltak_z0.00_{0:d}_{1:.0f}Mpc.npy".format(DIM, BOX_LEN))
+	hvbox_large = np.zeros((DIM, DIM, DIM), dtype=np.float32)
+	hvbox_small = np.zeros(HII_shape, dtype=np.float32)
+	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
+	largevbox_d = gpuarray.zeros((DIM,DIM,N), dtype=np.complex64)
+	smallvbox_d = gpuarray.zeros((HII_DIM, HII_DIM, M), dtype=np.float32)
+	for num, mode in enumerate(['x', 'y', 'z']):
+		for meta_z in xrange(META_GRID_SIZE):
+			largebox_d = gpuarray.to_gpu_async(hbox_large[:, :, meta_z*N:(meta_z+1)*N].copy())
+			#largebox_d /=  VOLUME  #divide by VOLUME if using fft (vs ifft)
+			velocity_kernel(largebox_d, largevbox_d, DIM, np.int32(meta_z), np.int32(num), block=block_size, grid=stitch_grid_size)
+			HII_filter(largevbox_d, DIM, ZERO, smoothR, block=block_size, grid=stitch_grid_size)
+			print hvbox_large.shape, largevbox_d.shape
+			hvbox_large[:, :, meta_z*N:(meta_z+1)*N] = largevbox_d.get_async()
+		hvbox_large = fft_stitch(N, plan2d, plan1d, hvbox_large, largevbox_d).real
+		for meta_z in xrange(META_GRID_SIZE):
+			largevbox_d = gpuarray.to_gpu_async(hvbox_large[:, :, meta_z*N:(meta_z+1)*N].copy())
+			subsample_kernel(largevbox_d.real, smallvbox_d, DIM, HII_DIM,PIXEL_FACTOR, block=block_size, grid=HII_stitch_grid_size)
+			hvbox_small[:, :, meta_z*M:(meta_z+1)*M] = smallvbox_d.get_async()
+		np.save(parent_folder+"/Boxes/v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallvbox_d.get())
 
 	return
 
@@ -250,6 +280,7 @@ def init_stitch(N):
 
 def run():
 	(free,total) = cuda.mem_get_info()
+	#free = 2.e9
 	print "Device global memory {0:.2f}GB total, {1:0.2f}GB free".format(total/1.e9, free/1.e9)
 	print "Roughly {0:.2f}GB required for large box".format(float(NBYTES*4)/1.e9)
 	if not os.path.exists(parent_folder+'/Boxes'):
@@ -259,10 +290,10 @@ def run():
 		init()
 	else:
 		N = DIM
-		while float(N)/DIM*NBYTES*32 > free:
+		while float(N)/DIM*NBYTES*8 > free:
 			N /= 2
 		print "Stitching with {} meta block size".format(N)
-		init_stitch(np.int32(128))
+		init_stitch(np.int32(N))
 	#step2()
 
 if __name__=="__main__":

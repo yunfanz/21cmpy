@@ -3,7 +3,7 @@ import numpy as np
 IO_DIR = "/home/yunfanz/Projects/21cm/Py21cm"
 
 DIM = np.int32(512) #dimension of large box in pixels
-HII_DIM = np.int32(64)
+HII_DIM = np.int32(128)
 PIXEL_FACTOR = np.float32(DIM)/np.float32(HII_DIM)
 MASS_FACTOR = np.float32(PIXEL_FACTOR**3.)
 BOX_LEN = np.float32(128)
@@ -15,7 +15,7 @@ HII_TOT_NUM_PIXELS = HII_DIM*HII_DIM*HII_DIM
 HII_shape = (HII_DIM, HII_DIM, HII_DIM)
 
 INITIAL_REDSHIFT = 300.
-EVOLVE_DENSITY_LINEARLY = True
+EVOLVE_DENSITY_LINEARLY = False
 ION_Tvir_MIN = 1.e4
 ZETA = 40.
 R_BUBBLE_MAX = 30. #Mpc

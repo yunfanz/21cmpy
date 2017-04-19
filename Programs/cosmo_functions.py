@@ -1,5 +1,5 @@
 import cosmolopy.perturbation as pb
-import cosmolopy.cd as ccd
+import cosmolopy
 import numpy as np
 from ..Parameter_files import *
 
@@ -10,12 +10,12 @@ def dDdz(z):
 
 def dtdz(z):
 	dz = 1e-10
-	return (ccd.age(z+dz, **COSMO)-ccd.age(z, **COSMO))/dz
+	return (cosmolopy.cd.age(z+dz, **COSMO)-cosmolopy.cd.age(z, **COSMO))/dz
 
 def dDdt(z):
 	dz = 1e-10
 	tiny = 1e-4
 	return dDdz(z)/dtdz(z)
 
-def dDdt_D(z):
+def dDdtoverD(z):
 	return dDdt(z)/pb.fgrowth(z, COSMO['omega_M_0'])

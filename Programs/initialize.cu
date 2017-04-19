@@ -75,6 +75,7 @@ __global__ void init_kernel(float* fourierbox, int w)
 
   //fourierbox[p] = sqrt(ps * %(VOLUME)s / 2.0f); //use this one if adj_complex
   fourierbox[p] = sqrt(ps * %(VOLUME)s );
+  //fourierbox[p] = s_K[ind];
 }
 
  /*****  Adjust the complex conjugate relations for a real array  *****/

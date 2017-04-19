@@ -77,9 +77,11 @@ def evolve_zeldovich(z, deltax):
 	main_module = nvcc.SourceModule(kernel_code)
 	move_mass = main_module.get_function("move_mass")
 	velocity_kernel = main_module.get_function("set_velocity")
+	filter_kernel = main_module.get_function("filter")
+	subsample_kernel = main_module.get_function("subsample")
 
-	fgrowth = pb.fgrowth(z, cosmo['omega_M_0']) #normalized to 1 at z=0
-	primordial_fgrowth = pb.fgrowth(INITIAL_REDSHIFT, cosmo['omega_M_0']) #normalized to 1 at z=0
+	fgrowth = np.float32(pb.fgrowth(z, COSMO['omega_M_0'])) #normalized to 1 at z=0
+	primordial_fgrowth = np.float32(pb.fgrowth(INITIAL_REDSHIFT, COSMO['omega_M_0'])) #normalized to 1 at z=0
 
 	vx = np.load(parent_folder+"/Boxes/vxoverddot_{0:d}_{1:.0f}Mpc.npy".format(HII_DIM, BOX_LEN))
 	vy = np.load(parent_folder+"/Boxes/vyoverddot_{0:d}_{1:.0f}Mpc.npy".format(HII_DIM, BOX_LEN))
@@ -92,23 +94,26 @@ def evolve_zeldovich(z, deltax):
 	vz_d *= ((fgrowth-primordial_fgrowth) / BOX_LEN)
 
 	updated_d = gpuarray.zeros_like(vx_d)
-	deltax_d = gpuarray.to_gpu(deltax)
+	delta_d = gpuarray.to_gpu(deltax)
 
-	move_mass(updated_d, deltax_d, vx_d, vy_d, vz_d, primordial_fgrowth, block=block_size, grid=grid_size)
+	move_mass(updated_d, delta_d, vx_d, vy_d, vz_d, primordial_fgrowth, block=block_size, grid=grid_size)
 	updated_d /= MASS_FACTOR
 	updated_d -= np.float32(1.) #renormalize to the new pixel size, and make into delta
-	np.save(parent_folder+"/Boxes/updated_smoothed_deltax_z{0:.00f}_{1:d}_{2:.0f}Mpc".format(z, HII_DIM, BOX_LEN), updated)
+	updated = updated_d.get_async()
+	np.save(parent_folder+"/Boxes/updated_smoothed_deltax_z{0:.2f}_{1:d}_{2:.0f}Mpc".format(z, HII_DIM, BOX_LEN), updated)
 
 
 	plan = Plan(HII_shape, dtype=np.complex64)
-	vbox_d = gpuarray.zeros_like(deltax_d)
+	delta_d = delta_d.astype(np.complex64)
+	vbox_d = gpuarray.zeros_like(delta_d)
 	smallvbox_d = gpuarray.zeros(HII_shape, dtype=np.float32)
-	plan.execute(deltax_d) #now deltak
-	dDdt_D = np.float32(dDdt_D(z))
+	plan.execute(delta_d) #now deltak
+	dDdt_D = np.float32(dDdtoverD(z))
+	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
 	for num, mode in enumerate(['x', 'y', 'z']):
-		velocity_kernel(deltax_d, vbox_d, dDdt_D, DIM, np.int32(num), block=block_size, grid=grid_size)
-		HII_filter(vbox_d, DIM, ZERO, smoothR, block=block_size, grid=grid_size)
-		plan.execute(largevbox_d, inverse=True)
+		velocity_kernel(delta_d, vbox_d, dDdt_D, DIM, np.int32(num), block=block_size, grid=grid_size)
+		filter_kernel(vbox_d, DIM, ZERO, smoothR, block=block_size, grid=grid_size)
+		plan.execute(vbox_d, inverse=True)
 		subsample_kernel(vbox_d.real, smallvbox_d, DIM, HII_DIM,PIXEL_FACTOR, block=block_size, grid=HII_grid_size)
 		np.save(parent_folder+"/Boxes/updated_v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallvbox_d.get())
 

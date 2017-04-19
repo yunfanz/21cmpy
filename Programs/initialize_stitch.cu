@@ -99,19 +99,22 @@ __global__ void subsample(float* largebox, float* smallbox, int w, int sw, float
   smallbox[p] = largebox[INDEX(lk,lj,li,w)];
 }
 
-__global__ void set_velocity(pycuda::complex<float>* fourierbox, pycuda::complex<float>* vbox, int w, int comp)
+__global__ void set_velocity(pycuda::complex<float>* fourierbox, pycuda::complex<float>* vbox, int w, int meta_z, int comp)
 {
   int tx = threadIdx.x;  int ty = threadIdx.y; int tz = threadIdx.z;
   int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
   int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int p = INDEX(k,j,i,w);
+  int meta_i = i;
+  int meta_j = j;
+  int meta_k = meta_z*META_DIM + k;
+  int p = INDEX(k,j,i,w); 
   if (j >= w || i >= w || k >= w) return;
   float k_x, k_y, k_z, k_sq;
   int hw = w/2; 
-  k_z = (k>hw) ? (k-w)*%(DELTAK)s : k*%(DELTAK)s;
-  k_y = (j>hw) ? (j-w)*%(DELTAK)s : j*%(DELTAK)s;
-  k_x = (i>hw) ? (i-w)*%(DELTAK)s : i*%(DELTAK)s;
+  k_z = (meta_k>hw) ? (meta_k-DIM)*%(DELTAK)s : meta_k*%(DELTAK)s;
+  k_y = (meta_j>hw) ? (meta_j-DIM)*%(DELTAK)s : meta_j*%(DELTAK)s;
+  k_x = (meta_i>hw) ? (meta_i-DIM)*%(DELTAK)s : meta_i*%(DELTAK)s;
 
   k_sq = k_x*k_x + k_y*k_y + k_z*k_z;
   if (k_sq == 0)
