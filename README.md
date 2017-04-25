@@ -13,6 +13,8 @@ This package currently has the following main components (See [[1]] for details.
 
 4. delta_T.py: computes brightness temperature and 21cm power spectrum. 
 
+![ES](web/smooth.gif)
+
 ## Sample Usage
 This package is still in working progress. 
 Current sample usage is as follows:
@@ -30,7 +32,6 @@ python -m Py21cm.Programs.find_HII_bubbles
 python -m Py21cm.Programs.delta_T
 ```
 
-![ES](web/smooth.gif)
 
 ## Dependencies
 
