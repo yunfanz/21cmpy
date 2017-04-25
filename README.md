@@ -16,12 +16,18 @@ This package currently has the following main components (See [[1]] for details.
 ## Sample Usage
 This package is still in working progress. 
 Current sample usage is as follows:
+
 ```
-from Py21cm.Programs import *
-initialize.run()
-perturb_field.run(z=12.)
-find_HII_bubbles.run()
-delta_T.run()
+git clone 21cmpy ./Py21cm
+```
+
+
+First modify INIT_PARAMS.py, then outside of the directory
+```
+python -m Py21cm.Programs.initialize
+python -m Py21cm.Programs.perturb_field
+python -m Py21cm.Programs.find_HII_bubbles
+python -m Py21cm.Programs.delta_T
 ```
 
 ![ES](web/smooth.gif)
