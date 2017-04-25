@@ -33,7 +33,7 @@ numpy, matplotlib, pycuda, cosmolopy
 ```
 **References**
 
-[[1]] 21cmFAST: A Fast, Semi-Numerical Simulation of the High-Redshift 21-cm Signal. Andrei Mesinger, Steven Furlanetto, Renyue Cen arXiv:1003.3878
+[[1]]21cmFAST: A Fast, Semi-Numerical Simulation of the High-Redshift 21-cm Signal. Andrei Mesinger, Steven Furlanetto, Renyue Cen arXiv:1003.3878
 
 [[2]](https://github.com/andreimesinger/21cmFAST) 21cmFast by Andrei Messinger
 
