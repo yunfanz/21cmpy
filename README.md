@@ -6,7 +6,11 @@ PyCUDA implementation of 21cmFAST: in working progress
 
 ![ES](web/smooth.gif)
 
+## Dependencies
 
+```
+numpy, matplotlib, pycuda, cosmolopy
+```
 
 [[1]] 21cmFAST: A Fast, Semi-Numerical Simulation of the High-Redshift 21-cm Signal. Andrei Mesinger, Steven Furlanetto, Renyue Cen arXiv:1003.3878
 [[2]](https://github.com/andreimesinger/21cmFAST) 21cmFast by Andrei Messinger
