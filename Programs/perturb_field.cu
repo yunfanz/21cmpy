@@ -1,6 +1,7 @@
 #define BLOCK_SIZE 8
 #include <pycuda-complex.hpp>
 #define INDEX(k,j,i,ld) ((k)*ld*ld + (j) * ld + (i))
+#define C_INDEX(k,j,i,ld) ((i)*ld*ld + (j) * ld + (k))
 #define E (float) (2.7182818284)
 
  __global__ void filter(pycuda::complex<float>* fourierbox, int w, int filter_type, float R)
@@ -9,7 +10,7 @@
   int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
   int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int p = INDEX(k,j,i,w);
+  int p = C_INDEX(k,j,i,w);
   if (j >= w || i >= w || k >= w) return;
   float k_x, k_y, k_z, k_mag, kR;
   int hw = w/2; 
@@ -42,7 +43,7 @@ float dDdt_overD, int w, int comp)
   int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
   int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int p = INDEX(k,j,i,w);
+  int p = C_INDEX(k,j,i,w);
   if (j >= w || i >= w || k >= w) return;
   float k_x, k_y, k_z, k_sq;
   int hw = w/2; 
@@ -58,15 +59,17 @@ float dDdt_overD, int w, int comp)
   }
   pycuda::complex<float> I = pycuda::complex<float>(0.f, 1.f);
   pycuda::complex<float> factor;
-  switch (comp) {
-    case 0:
-      factor = k_x*dDdt_overD*I/k_sq;
-    case 1:
-      factor = k_y*dDdt_overD*I/k_sq;
-    case 2:
-      factor = k_z*dDdt_overD*I/k_sq;
-  vbox[p] = factor * fourierbox[p];
+  if (comp == 0) {
+    factor = k_x*dDdt_overD*I/k_sq;
   }
+  else if (comp == 1){
+  	factor = k_y*dDdt_overD*I/k_sq;
+  }
+  else if (comp == 2 ){
+  	factor = k_z*dDdt_overD*I/k_sq;
+  }
+
+  vbox[p] = factor * fourierbox[p];
 }
 
 __global__ void subsample(float* largebox, float* smallbox, int w, int sw, float pixel_factor)
@@ -75,42 +78,44 @@ __global__ void subsample(float* largebox, float* smallbox, int w, int sw, float
   int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
   int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int p = INDEX(k,j,i,sw);
+  int p = C_INDEX(k,j,i,sw);
   int lk = floor(k*pixel_factor + 0.5);
   int lj = floor(j*pixel_factor + 0.5);
   int li = floor(i*pixel_factor + 0.5);
 
   if (j >= sw || i >= sw || k >= sw) return;
-  smallbox[p] = largebox[INDEX(lk,lj,li,w)];
+  smallbox[p] = largebox[C_INDEX(lk,lj,li,w)];
 }
 
 __global__ void move_mass(float* updated, float* deltax, float* vx, float* vy, float* vz, float init_growth_factor)
 {
 	int w = %(DIM)s;
 	int sw = %(HII_DIM)s;
+	float swf = sw;
 
 	int tx = threadIdx.x;  int ty = threadIdx.y; int tz = threadIdx.z;
 	int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
 	int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
 	int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-	int p = INDEX(k,j,i,w);
+	uint p = C_INDEX(k,j,i,w);
+	//if (i>0) { return;}
 	float xf = (i+0.5)/(w + 0.0);
 	float yf = (j+0.5)/(w + 0.0);
 	float zf = (k+0.5)/(w + 0.0);
-	int HII_i = int(i/%(PIXEL_FACTOR)s);
-	int HII_j = int(j/%(PIXEL_FACTOR)s);
-	int HII_k = int(k/%(PIXEL_FACTOR)s);
-	xf += vx[INDEX(HII_k, HII_j, HII_i, sw)];
-	yf += vy[INDEX(HII_k, HII_j, HII_i, sw)];
-	zf += vz[INDEX(HII_k, HII_j, HII_i, sw)];
-	xf *= sw; yf *= sw; zf *= sw;
+	int HII_i = floor(i/%(PIXEL_FACTOR)s);
+	int HII_j = floor(j/%(PIXEL_FACTOR)s);
+	int HII_k = floor(k/%(PIXEL_FACTOR)s);
+	xf += vx[C_INDEX(HII_k, HII_j, HII_i, sw)];  // I screwed up F vs C order
+	yf += vy[C_INDEX(HII_k, HII_j, HII_i, sw)];
+	zf += vz[C_INDEX(HII_k, HII_j, HII_i, sw)];
+	xf *= swf; yf *= swf; zf *= swf;
 
-	while (xf >= (float)sw){ xf -= sw;}
-	while (xf < 0){ xf += sw;}
-	while (yf >= (float)sw){ yf -= sw;}
-	while (yf < 0){ yf += sw;}
-	while (zf >= (float)sw){ zf -= sw;}
-	while (zf < 0){ zf += sw;}
+	while (xf >= swf){ xf -= swf;}
+	while (xf < 0){ xf += swf;}
+	while (yf >= swf){ yf -= swf;}
+	while (yf < 0){ yf += swf;}
+	while (zf >= swf){ zf -= swf;}
+	while (zf < 0){ zf += swf;}
 	int xi = xf; 
 	int yi = yf; 
 	int zi = zf;
@@ -122,8 +127,7 @@ __global__ void move_mass(float* updated, float* deltax, float* vx, float* vy, f
 	if (zi < 0) {zi += sw;}
 
 	// move the mass
-	//updated[INDEX(zi, yi, xi, sw)] += (1 + init_growth_factor*deltax[p]);
-	//__syncthreads();
-	atomicAdd(&updated[INDEX(zi, yi, xi, sw)], (1 + init_growth_factor*deltax[p]));
-	
+	//updated[INDEX(zi, yi, xi, sw)] = (1.0);
+	__syncthreads();
+	atomicAdd(&updated[C_INDEX(zi, yi, xi, sw)], (1.0 + init_growth_factor*deltax[p]));
 	}

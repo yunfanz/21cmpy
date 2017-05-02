@@ -2,6 +2,7 @@
 #define BLOCK_VOLUME 8*8*8
 #include <pycuda-complex.hpp>
 #define INDEX(k,j,i,ld) ((k)*ld*ld + (j) * ld + (i))
+#define C_INDEX(k,j,i,ld) ((i)*ld*ld + (j) * ld + (k))
 #define DIM %(DIM)s
 #define MIDDLE %(DIM)s/2
 #define E (float) (2.7182818284)
@@ -12,7 +13,7 @@ texture<float,2> pspec;
   int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
   int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int p = INDEX(k,j,i,w);
+  int p = C_INDEX(k,j,i,w);
   if (j >= w || i >= w || k >= w) return;
   float k_x, k_y, k_z, k_mag, kR;
   int hw = w/2; 
@@ -38,6 +39,21 @@ texture<float,2> pspec;
   }
 }
 
+__global__ void test_kernel(float* fourierbox, int w)
+{
+  int tx = threadIdx.x;  int ty = threadIdx.y; int tz = threadIdx.z;
+  int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
+  int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
+  int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
+  int p = INDEX(k,j,i,w);
+  if (j >= w || i >= w || k >= w) return;
+  float k_x, k_y, k_z, k_mag, ps;
+  int hw = w/2; 
+  k_z = (k>hw) ? (k-w)*%(DELTAK)s : k*%(DELTAK)s;
+  k_y = (j>hw) ? (j-w)*%(DELTAK)s : j*%(DELTAK)s;
+  k_x = (i>hw) ? (i-w)*%(DELTAK)s : i*%(DELTAK)s;
+  fourierbox[p] = k_x;
+}
 
 __global__ void init_kernel(float* fourierbox, int w)
 {
@@ -45,7 +61,7 @@ __global__ void init_kernel(float* fourierbox, int w)
   int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
   int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int p = INDEX(k,j,i,w); int tp = INDEX(tz,ty,tx, bdx);
+  int p = C_INDEX(k,j,i,w); int tp = INDEX(tz,ty,tx, bdx);
   if (j >= w || i >= w || k >= w) return;
   float k_x, k_y, k_z, k_mag, ps;
   int hw = w/2; 
@@ -75,7 +91,7 @@ __global__ void init_kernel(float* fourierbox, int w)
 
   //fourierbox[p] = sqrt(ps * %(VOLUME)s / 2.0f); //use this one if adj_complex
   fourierbox[p] = sqrt(ps * %(VOLUME)s );
-  //fourierbox[p] = s_K[ind];
+
 }
 
  /*****  Adjust the complex conjugate relations for a real array  *****/
@@ -120,13 +136,13 @@ __global__ void subsample(float* largebox, float* smallbox, int w, int sw, float
   int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
   int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int p = INDEX(k,j,i,sw);
+  int p = C_INDEX(k,j,i,sw);
   int lk = floor(k*pixel_factor + 0.5);
   int lj = floor(j*pixel_factor + 0.5);
   int li = floor(i*pixel_factor + 0.5);
 
   if (j >= sw || i >= sw || k >= sw) return;
-  smallbox[p] = largebox[INDEX(lk,lj,li,w)];
+  smallbox[p] = largebox[C_INDEX(lk,lj,li,w)];
 }
 
 __global__ void set_velocity(pycuda::complex<float>* fourierbox, pycuda::complex<float>* vbox, int w, int comp)
@@ -135,7 +151,7 @@ __global__ void set_velocity(pycuda::complex<float>* fourierbox, pycuda::complex
   int bx = blockIdx.x;   int by = blockIdx.y; int bz = blockIdx.z;
   int bdx = blockDim.x;  int bdy = blockDim.y; int bdz = blockDim.z;
   int i = bdx * bx + tx; int j = bdy * by + ty; int k = bdz * bz + tz;
-  int p = INDEX(k,j,i,w);
+  int p = C_INDEX(k,j,i,w); //k is still z direction
   if (j >= w || i >= w || k >= w) return;
   float k_x, k_y, k_z, k_sq;
   int hw = w/2; 
@@ -151,13 +167,24 @@ __global__ void set_velocity(pycuda::complex<float>* fourierbox, pycuda::complex
   }
   pycuda::complex<float> I = pycuda::complex<float>(0.f, 1.f);
   pycuda::complex<float> factor;
-  switch (comp) {
-    case 0:
-      factor = k_x*I/k_sq;
-    case 1:
-      factor = k_y*I/k_sq;
-    case 2:
-      factor = k_z*I/k_sq;
-  vbox[p] = factor * fourierbox[p];
+
+  if (comp == 0){
+    factor = k_x*I/k_sq;
   }
+  else if (comp == 1 ){
+    factor = k_y*I/k_sq;
+  }
+  else if (comp == 2 ){
+    factor = k_z*I/k_sq;
+  }
+  //switch (comp) {
+  //  case (int) 0:
+  //    factor = k_x*I/k_sq;
+  //  case (int) 1:
+  //    factor = k_y*I/k_sq;
+  //  case (int) 2:
+  //    factor = 0.0;
+  //    //factor = k_z*I/k_sq;
+  //}
+  vbox[p] = factor * fourierbox[p];
 }

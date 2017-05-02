@@ -223,14 +223,13 @@ def run(opts, args):
 	ion_field = conv_bubbles(d1, param_dict, Z, fil=opts.FILTER_TYPE, update=opts.UPDATE_TYPE, 
 		LE=opts.LIN, visualize=int(opts.VISUAL), quiet=opts.QUIET)
 	nf = 1 - np.mean(ion_field)
-	if not opts.INTERACTIVE:
-		outname = "xH_nohalos_z{0:.2f}_nf{1:f}_eff{2:.1f}_HIIfilter{3:d}_Tvirmin{4:.1f}_RHIImax{5:d}_{6:d}_{7:d}Mpc.npy".format(
-			Z,nf, ZETA, opts.FILTER_TYPE, ION_Tvir_MIN, int(R_BUBBLE_MAX), ion_field.shape[0], int(param_dict['BoxSize']))
-		print "saving", outname
-		np.save(opts.DIR+outname, 1-ion_field)
-		return
-	else:
-		return ion_field
+
+	outname = "xH_nohalos_z{0:.2f}_nf{1:f}_eff{2:.1f}_HIIfilter{3:d}_Tvirmin{4:.1f}_RHIImax{5:d}_{6:d}_{7:d}Mpc.npy".format(
+		Z,nf, ZETA, opts.FILTER_TYPE, ION_Tvir_MIN, int(R_BUBBLE_MAX), ion_field.shape[0], int(param_dict['BoxSize']))
+	print "saving", outname
+	np.save(opts.DIR+outname, 1-ion_field)
+
+	return ion_field
 
 
 if __name__ == '__main__':
@@ -244,4 +243,5 @@ if __name__ == '__main__':
 	o.add_option('-i','--inter', dest='INTERACTIVE', action="store_true")
 	(opts, args) = o.parse_args()
 
-	_ = run(opts, args)
+	ion_field = run(opts, args)
+	import IPython; IPython.embed()

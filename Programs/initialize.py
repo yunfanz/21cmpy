@@ -62,6 +62,7 @@ def init():
 
 	largebox_d = gpuarray.zeros(shape, dtype=np.float32)
 	init_kernel(largebox_d, np.int32(DIM), block=block_size, grid=grid_size)
+
 	#import IPython; IPython.embed()
 	largebox_d_imag = gpuarray.zeros(shape, dtype=np.float32)
 	init_kernel(largebox_d_imag, np.int32(DIM), block=block_size, grid=grid_size)
@@ -103,8 +104,9 @@ def init():
 		HII_filter(largevbox_d, DIM, ZERO, smoothR, block=block_size, grid=grid_size)
 		plan.execute(largevbox_d, inverse=True)
 		largevbox_d /= scale**3
+		#import IPython; IPython.embed()
 		subsample_kernel(largevbox_d.real, smallbox_d, DIM, HII_DIM,PIXEL_FACTOR, block=block_size, grid=HII_grid_size)
-		np.save(parent_folder+"/Boxes/v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallbox_d.get_async())
+		np.save(parent_folder+"/Boxes/v{0}overddot_{1:d}_{2:.0f}Mpc".format(mode, HII_DIM, BOX_LEN), smallbox_d.get())
 
 	return
 

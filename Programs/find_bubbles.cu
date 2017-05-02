@@ -95,7 +95,7 @@ __global__ void update_kernel(float* ionized, float* fcollapse, const int w)
 			for (int jj = bby1; jj < bby2; jj++) {
 				for (int ii = bbx1; ii < bbx2; ii++){
 					rsq = (ii-i)*(ii-i)+(jj-j)*(jj-j)+(kk-k)*(kk-k);
-					if (rsq < R*R) {ionized[INDEX(kk,jj,ii,w)] = 1.0;}
+					if (rsq < R*R) {ionized[INDEX(kk,jj,ii,w)] = 1.0;} //should use atomic?
 				}
 			}
 		}

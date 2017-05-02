@@ -23,7 +23,7 @@ Author: Yunfan G. Zhang
 """
 import pycuda.compiler as nvcc
 import pycuda.gpuarray as gpuarray
-import pycuda.driver as cu
+import pycuda.driver as cuda
 import pycuda.autoinit
 from pycuda.curandom import *
 import pycuda.cumath as cumath
@@ -34,19 +34,20 @@ from IO_utils import *
 #from ..cosmo_files import *
 from cosmo_functions import *
 from ..Parameter_files import *
+from ..tocmfastpy import boxio
 
 def evolve_linear(z, deltax):
 	"""
 	Input type IN must be numpy or 21cmfast
 	"""
 	
-	fgrowth = pb.fgrowth(z, cosmo['omega_M_0']) #normalized to 1 at z=0
+	fgrowth = pb.fgrowth(z, COSMO['omega_M_0']) #normalized to 1 at z=0
 	#primordial_fgrowth = pb.fgrowth(INITIAL_REDSHIFT, cosmo['omega_M_0']) #normalized to 1 at z=0
 	
 
 	updated = deltax*fgrowth
-		
-	np.save(parent_folder+"/Boxes/updated_smoothed_deltax_z{0:.00f}_{1:d}_{2:.0f}Mpc".format(z, HII_DIM, BOX_LEN), updated)
+
+	np.save(parent_folder+"/Boxes/updated_smoothed_deltax_z{0:.2f}_{1:d}_{2:.0f}Mpc".format(z, HII_DIM, BOX_LEN), updated)
 
 
 	if False: #velocity information may not be useful for linear field
@@ -89,26 +90,33 @@ def evolve_zeldovich(z, deltax):
 	vx_d = gpuarray.to_gpu(vx)
 	vy_d = gpuarray.to_gpu(vy)
 	vz_d = gpuarray.to_gpu(vz)
-	vx_d *= ((fgrowth-primordial_fgrowth) / BOX_LEN)
+	vx_d *= ((fgrowth-primordial_fgrowth) / BOX_LEN) #this is now comoving displacement in units of box size
 	vy_d *= ((fgrowth-primordial_fgrowth) / BOX_LEN)
 	vz_d *= ((fgrowth-primordial_fgrowth) / BOX_LEN)
 
-	updated_d = gpuarray.zeros_like(vx_d)
+	#updated_d = gpuarray.zeros_like(vx_d)
+	start = cuda.Event()
+	updated_d = gpuarray.zeros(HII_shape, dtype=np.float32)
 	delta_d = gpuarray.to_gpu(deltax)
+	start.record(); start.synchronize()
 
 	move_mass(updated_d, delta_d, vx_d, vy_d, vz_d, primordial_fgrowth, block=block_size, grid=grid_size)
 	updated_d /= MASS_FACTOR
 	updated_d -= np.float32(1.) #renormalize to the new pixel size, and make into delta
 	updated = updated_d.get_async()
+	#import IPython; IPython.embed()
 	np.save(parent_folder+"/Boxes/updated_smoothed_deltax_z{0:.2f}_{1:d}_{2:.0f}Mpc".format(z, HII_DIM, BOX_LEN), updated)
 
 
-	plan = Plan(HII_shape, dtype=np.complex64)
+	plan = Plan((DIM, DIM, DIM), dtype=np.complex64)
 	delta_d = delta_d.astype(np.complex64)
+	#import IPython; IPython.embed()
 	vbox_d = gpuarray.zeros_like(delta_d)
 	smallvbox_d = gpuarray.zeros(HII_shape, dtype=np.float32)
 	plan.execute(delta_d) #now deltak
 	dDdt_D = np.float32(dDdtoverD(z))
+	#print dDdt_D
+	#import IPython; IPython.embed()
 	smoothR = np.float32(L_FACTOR*BOX_LEN/HII_DIM)
 	for num, mode in enumerate(['x', 'y', 'z']):
 		velocity_kernel(delta_d, vbox_d, dDdt_D, DIM, np.int32(num), block=block_size, grid=grid_size)
